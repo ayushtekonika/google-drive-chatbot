@@ -1,0 +1,5 @@
+.DS_Store
+fastapi/creds.json
+fastapi/token.json
+fastapi/__pycache__
+fastapi/assets
