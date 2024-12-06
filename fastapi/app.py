@@ -153,14 +153,21 @@ async def download_files_task(processing_id, service):
 
 def load_or_refresh_credentials():
     if os.path.exists(TOKEN_FILE):
+        print('token file exists')
         creds = Credentials.from_authorized_user_file(TOKEN_FILE)
+        print(creds)
         if creds.valid:
+            print('creds valid')
             return creds
         if creds.expired and creds.refresh_token:
+            print('creds refresh')
             creds.refresh(GoogleRequest())
+            print('refresh done')
             with open(TOKEN_FILE, "w") as token_file:
+                print('write to token file')
                 token_file.write(creds.to_json())
             return creds
+    print('just none')
     return None
 
 @app.get("/auth")
@@ -190,6 +197,7 @@ async def callback(request: Request):
     try:
         creds = load_or_refresh_credentials()
         if creds:
+            print('start processing with existing creds')
             processing_id = str(uuid.uuid4())
             service = build('drive', 'v3', credentials=creds)
             create_task(download_files_task(processing_id, service))
@@ -197,6 +205,7 @@ async def callback(request: Request):
             return RedirectResponse(url=url_with_processing_id)
 
         # If no valid token exists, proceed with OAuth flow
+        print('get new token')
         query_params = request.query_params
         code = query_params.get("code")
 
