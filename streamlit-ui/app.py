@@ -8,8 +8,11 @@ import webbrowser
 
 API_BASE_URL = os.getenv("SERVER_URL", "http://127.0.0.1:8000")
 
+print(API_BASE_URL)
+
 def redirect_to_google_consent():
     auth_url = f"{API_BASE_URL}/auth"
+    print('test', auth_url)
     webbrowser.open(auth_url)
 
 # FastAPI base URL (adjust if hosted elsewhere)
