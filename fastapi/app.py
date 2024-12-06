@@ -225,6 +225,7 @@ async def callback(request: Request):
         credentials = flow.credentials
         with open(TOKEN_FILE, "w") as token_file:
             print('write token')
+            print(credentials.to_json())
             token_file.write(credentials.to_json())
 
         # Create a processing ID and start the download task
