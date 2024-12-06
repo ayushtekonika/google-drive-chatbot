@@ -36,7 +36,7 @@ STREAMLIT_UI_URL = os.getenv("STREAMLIT_UI_URL", "http://localhost:8501")
 flow = Flow.from_client_secrets_file(
     CREDENTIALS_FILE,
     scopes=SCOPES,
-    redirect_uri=os.getenv("APP_URL", "http://127.0.0.1:8000/callback"),  # Explicit redirect URI
+    redirect_uri=f"{os.getenv('APP_URL', 'http://127.0.0.1:8000')}/callback",  # Explicit redirect URI
 )
 
 def sanitize_filename(filename):
