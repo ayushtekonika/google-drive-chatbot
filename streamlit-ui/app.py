@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import requests
 from urllib.parse import urlencode
@@ -5,12 +6,13 @@ import time
 import webbrowser
 
 
+API_BASE_URL = os.getenv("SERVER_URL", "http://127.0.0.1:8000")
+
 def redirect_to_google_consent():
     auth_url = f"{API_BASE_URL}/auth"
     webbrowser.open(auth_url)
 
 # FastAPI base URL (adjust if hosted elsewhere)
-API_BASE_URL = "http://127.0.0.1:8000"
 
 # Streamlit app
 st.title("Google Drive Sync")
