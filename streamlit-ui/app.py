@@ -1,5 +1,6 @@
 import os
 import streamlit as st
+from streamlit.components.v1 import html
 import requests
 from urllib.parse import urlencode
 import time
@@ -8,13 +9,18 @@ import webbrowser
 
 API_BASE_URL = os.getenv("SERVER_URL", "http://127.0.0.1:8000")
 
-print(API_BASE_URL)
-
 def redirect_to_google_consent():
     auth_url = f"{API_BASE_URL}/auth"
-    print('test', auth_url)
     webbrowser.open(auth_url)
 
+def open_page():
+    url = f"{API_BASE_URL}/auth"
+    open_script= """
+        <script type="text/javascript">
+            window.open('%s', '_blank').focus();
+        </script>
+    """ % (url)
+    html(open_script)
 # FastAPI base URL (adjust if hosted elsewhere)
 
 # Streamlit app
@@ -27,7 +33,7 @@ processing_id = query_params.get("processing_id")
 if not processing_id:
     # No processing ID, show the sync button
     st.write("Click the button below to sync files with Google Drive.")
-    st.button("Sync with Google Drive", on_click=redirect_to_google_consent)
+    st.button("Sync with Google Drive", on_click=open_page)
 else:
     # Processing ID found, poll the status
     st.write(f"Processing ID: {processing_id}")
