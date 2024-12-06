@@ -208,6 +208,7 @@ async def callback(request: Request):
         print('get new token')
         query_params = request.query_params
         code = query_params.get("code")
+        print(code)
 
         if not code:
             return JSONResponse(
@@ -216,17 +217,23 @@ async def callback(request: Request):
             )
 
         # Fetch the token using the code
+        print('fetch token')
         flow.fetch_token(code=code)
 
         # Save the new token
+        print('save token')
         credentials = flow.credentials
         with open(TOKEN_FILE, "w") as token_file:
+            print('write token')
             token_file.write(credentials.to_json())
 
         # Create a processing ID and start the download task
         processing_id = str(uuid.uuid4())
+        print('start processing')
         creds = Credentials.from_authorized_user_file(TOKEN_FILE)
+        print(creds)
         service = build('drive', 'v3', credentials=creds)
+        print('service built')
         create_task(download_files_task(processing_id, service))
 
         url_with_processing_id = f"{STREAMLIT_UI_URL}?processing_id={processing_id}"
