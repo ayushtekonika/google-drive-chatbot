@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi import FastAPI, HTTPException, Request
 
 from google.oauth2.credentials import Credentials
-from google.auth.exceptions import GoogleAuthError
+from google.auth.exceptions import GoogleAuthError, RefreshError
 from google.auth.transport.requests import Request as GoogleRequest
 
 from googleapiclient.http import MediaIoBaseDownload
@@ -72,8 +72,16 @@ def download_file(service, file_id, file_name):
     """
     Downloads a file by its ID and saves it locally.
     """
+    if not file_name.lower().endswith(('.docx', '.pdf')):
+        logger.info(f"Skipping download for '{file_name}': Unsupported file type.")
+        return
+    
     request = service.files().get_media(fileId=file_id)
     file_path = os.path.join(DOWNLOAD_DIR, sanitize_filename(file_name))
+
+    if os.path.exists(file_path):
+        logger.info(f"File '{file_name}' already exists at {file_path}. Skipping download.")
+        return
 
     with io.FileIO(file_path, 'wb') as file:
         downloader = MediaIoBaseDownload(file, request)
@@ -153,18 +161,13 @@ async def download_files_task(processing_id, service):
 
 def load_or_refresh_credentials():
     if os.path.exists(TOKEN_FILE):
-        print('token file exists')
         creds = Credentials.from_authorized_user_file(TOKEN_FILE)
         print(creds)
         if creds.valid:
-            print('creds valid')
             return creds
         if creds.expired and creds.refresh_token:
-            print('creds refresh')
             creds.refresh(GoogleRequest())
-            print('refresh done')
             with open(TOKEN_FILE, "w") as token_file:
-                print('write to token file')
                 token_file.write(creds.to_json())
             return creds
     print('just none')
@@ -195,9 +198,10 @@ async def callback(request: Request):
     Handle the redirect from Google after user consents.
     """
     try:
+        query_params = request.query_params
+        code = query_params.get("code")
         creds = load_or_refresh_credentials()
         if creds:
-            print('start processing with existing creds')
             processing_id = str(uuid.uuid4())
             service = build('drive', 'v3', credentials=creds)
             create_task(download_files_task(processing_id, service))
@@ -205,11 +209,6 @@ async def callback(request: Request):
             return RedirectResponse(url=url_with_processing_id)
 
         # If no valid token exists, proceed with OAuth flow
-        print('get new token')
-        query_params = request.query_params
-        code = query_params.get("code")
-        print(code)
-
         if not code:
             return JSONResponse(
                 status_code=400,
@@ -221,24 +220,25 @@ async def callback(request: Request):
         flow.fetch_token(code=code)
 
         # Save the new token
-        print('save token')
         credentials = flow.credentials
         with open(TOKEN_FILE, "w") as token_file:
-            print('write token')
             print(credentials.to_json())
             token_file.write(credentials.to_json())
 
         # Create a processing ID and start the download task
         processing_id = str(uuid.uuid4())
-        print('start processing')
         creds = Credentials.from_authorized_user_file(TOKEN_FILE)
-        print(creds)
         service = build('drive', 'v3', credentials=creds)
-        print('service built')
         create_task(download_files_task(processing_id, service))
 
         url_with_processing_id = f"{STREAMLIT_UI_URL}?processing_id={processing_id}"
         return RedirectResponse(url=url_with_processing_id)
+    
+    except RefreshError as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Refresh token error", "details": str(e)},
+        )
 
     except GoogleAuthError as e:
         return JSONResponse(
