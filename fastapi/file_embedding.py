@@ -27,9 +27,9 @@ def process_and_add_embeddings():
     for file_name in os.listdir(ASSETS_DIR):
         file_path = os.path.join(ASSETS_DIR, file_name)
         
-        # if file_path.endswith('.pdf'):
-        #     loader = PyPDFLoader(file_path)
-        if file_path.endswith('.doc') or file_path.endswith('.docx'):
+        if file_path.endswith('.pdf'):
+            loader = PyPDFLoader(file_path)
+        elif file_path.endswith('.doc') or file_path.endswith('.docx'):
             loader = UnstructuredWordDocumentLoader(file_path)
         else:
             continue  
