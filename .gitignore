@@ -1,4 +1,5 @@
 .DS_Store
+.env
 fastapi/creds.json
 fastapi/token.json
 fastapi/__pycache__

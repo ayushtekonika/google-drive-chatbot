@@ -1,14 +1,20 @@
 import os
 import uuid
+from pathlib import Path
+from dotenv import load_dotenv
 from asyncio import create_task, Lock
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from google.auth.exceptions import GoogleAuthError
 from google_drive_downloader import GoogleDriveDownloader
-from google_auth_oauthlib.flow import Flow
+from google_auth_oauthlib.flow import Flow 
+from file_embedding import process_and_add_embeddings
+
+env_path = Path('.env')
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
 
 app = FastAPI()
-
 STREAMLIT_UI_URL = os.getenv("STREAMLIT_UI_URL", "http://localhost:8501")
 ROOT_FOLDER_NAME = "Mridu Tiwari (RFP Overall Master - New)"
 status_lock = Lock()
@@ -31,13 +37,14 @@ async def authenticate():
 @app.get("/callback")
 async def callback(request: Request):
     try:
-        code = request.query_params.get("code")
-        if not code:
-            raise HTTPException(status_code=400, detail="Missing authorization code")
-
-        flow.fetch_token(code=code)
-        with open(GoogleDriveDownloader.TOKEN_FILE, "w") as token_file:
-            token_file.write(flow.credentials.to_json())
+        if not os.path.exists(GoogleDriveDownloader.TOKEN_FILE):            
+            code = request.query_params.get("code")
+            if not code:
+                raise HTTPException(status_code=400, detail="Missing authorization code")
+            
+            flow.fetch_token(code=code)
+            with open(GoogleDriveDownloader.TOKEN_FILE, "w") as token_file:
+                token_file.write(flow.credentials.to_json())
 
         processing_id = str(uuid.uuid4())
         downloader = GoogleDriveDownloader()
@@ -62,6 +69,7 @@ async def download_files_task(processing_id: str, downloader: GoogleDriveDownloa
             download_statuses[processing_id] = "in_progress"
 
         downloader.download_files_in_folder(ROOT_FOLDER_NAME)
+        process_and_add_embeddings()
 
         async with status_lock:
             download_statuses[processing_id] = "completed"
