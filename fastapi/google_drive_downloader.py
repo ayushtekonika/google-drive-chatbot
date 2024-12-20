@@ -62,7 +62,7 @@ class GoogleDriveDownloader:
     def list_files_in_folder(self, folder_id):
         """List all files in a folder by its ID."""
         results = self.service.files().list(
-            q=f"'{folder_id}' in parents",
+            q=f"'{folder_id}' in parents and trashed = false",
             fields="files(id, name, mimeType)"
         ).execute()
         return results.get('files', [])

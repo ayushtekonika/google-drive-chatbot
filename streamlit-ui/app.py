@@ -10,6 +10,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langchain_core.documents import Document
 from qdrant_client import QdrantClient
+from langchain.vectorstores import Qdrant
+from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_qdrant import QdrantVectorStore
 from langchain_mistralai import ChatMistralAI
 from langchain_mistralai import MistralAIEmbeddings
@@ -47,13 +49,13 @@ def open_page():
 # FastAPI base URL (adjust if hosted elsewhere)
 
 # Streamlit app
-st.title("Google Drive Sync")
+st.title("Google Drive Chatbot")
 
 # Retrieve the URL query parameters
 query_params = st.query_params
 processing_id = query_params.get("processing_id")
 
-def retrieve_as_retriever():
+def retrieve_as_retriever() -> VectorStoreRetriever:
     """Load the existing vectorstore and retrieve top_k relevant documents based on the query."""
     try:
         qdrant_client = QdrantClient(
@@ -66,23 +68,22 @@ def retrieve_as_retriever():
         vectorstore = QdrantVectorStore(
             client=qdrant_client,
             collection_name=QDRANT_COLLECTION,
-            embedding=embeddings
+            embedding=embeddings,
+            metadata_payload_key="metadata"
         )
         
         # Retrieve the top 3 documents using similarity search
-        return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3})
+        return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3, "with_payload": True})
     except Exception as e:
         print(f"Error during document retrieval: {e}")
         raise e
 
 def format_docs_with_id(docs: List[Document]) -> str:
-    for doc in docs:
-        print(doc.metadata)
-    # formatted = [
-    #     f"Source: {os.path.basename(os.path.normpath(doc.metadata['source']))}\nPage Number: {doc.metadata['page']}"
-    #     for i, doc in enumerate(docs)
-    # ]
-    return "\n\n" + "\n\n".join(["formatted"])
+    formatted = set([
+        f"Source: {os.path.basename(os.path.normpath(doc.metadata['source']))}"
+        for i, doc in enumerate(docs)
+    ])
+    return "\n\n" + "\n\n".join(formatted)
 
 
 class ChatAssistant:    
@@ -96,7 +97,7 @@ class ChatAssistant:
                     )
 
 
-    def generate_response(self):
+    def generate_response(self) -> RunnableWithMessageHistory:
 
         retriever = retrieve_as_retriever()
 
@@ -142,7 +143,7 @@ class ChatAssistant:
                 store[session_id] = ChatMessageHistory()
             return store[session_id]
 
-        conversational_rag_chain = RunnableWithMessageHistory(
+        conversational_rag_chain: RunnableWithMessageHistory = RunnableWithMessageHistory(
             rag_chain,
             get_session_history,
             input_messages_key="input",
@@ -153,7 +154,7 @@ class ChatAssistant:
         return conversational_rag_chain
 
 
-    def Response(self, conversational_rag_chain, query, session_id):
+    def Response(self, conversational_rag_chain: RunnableWithMessageHistory, query, session_id):
 
         response = conversational_rag_chain.invoke(
                 {"input": query},
@@ -162,10 +163,10 @@ class ChatAssistant:
                 },  # constructs a key "abc123" in `store`.
             )
         
-        # response_with_references = f"{response['answer']}\n````` {format_docs_with_id(response['context'])}"
+        response_with_references = f"{response['answer']}\n````` {format_docs_with_id(response['context'])}"
         response = response["answer"]
 
-        return response
+        return response_with_references
 
 
 def main():
@@ -207,7 +208,12 @@ def main():
                     current_process = json_resp.get("current_process")
                     progress = (embedded/total) if current_process == "Embedding" else (downloaded/total)
                     status_placeholder.write(f"Document Ingestion Status: {status}")
-                    progress_text = "Embedding documents..." if current_process == "Embedding" else "Downloading documents..."
+                    if current_process == "Embedding":
+                        progress_text = "Embedding documents..."
+                    elif current_process == "Downloading":
+                        progress_text = "Downloading documents..."
+                    else:
+                        progress_text = "Processing Complete"
                     my_bar.progress(progress, text=progress_text)
 
                     # Exit the loop if the status is completed or failed
@@ -223,7 +229,10 @@ def main():
 
             time.sleep(1)  # Poll every 1 second
 
-        st.write("Process completed. Refresh the page to start a new sync.")
+        st.write("Loading Chatbot...")
+        time.sleep(1)
+        st.query_params.clear()
+        st.rerun()
 
 if __name__=="__main__":
     main()

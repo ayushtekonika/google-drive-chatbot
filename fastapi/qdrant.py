@@ -1,4 +1,5 @@
 import os
+from uuid import uuid4
 from typing import Callable
 from qdrant_client import QdrantClient
 from langchain_core.documents.base import Document
@@ -55,11 +56,12 @@ class QdrantDB:
         vector_metadata_content = []
         downloaded_count = 0
         for doc in documents:
-            # print(doc.metadata)
-            # print(doc.id)
-            # print('------')
             doc_vector = self.embedding_function.embed_query(doc.page_content)
-            doc.metadata["text"] = doc.page_content
+            doc.metadata["metadata"] = {
+                "id": str(uuid4()),
+                "source": doc.metadata["source"],
+                "page_content": doc.page_content
+            }
             downloaded_count += 1
             # doc.metadata["result"] = (
             #     doc.metadata["source"].split("\\")[-1].split(".")[0]
