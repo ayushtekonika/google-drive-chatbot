@@ -1,25 +1,16 @@
 import os
+from typing import Callable
 # from langchain.document_loaders import PDFLoader, DocLoader
 from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader
 from langchain_mistralai import MistralAIEmbeddings
 from langchain_core.documents.base import Document
 from qdrant import QdrantDB
 
+ASSETS_DIR = "assets"
 
-def process_and_add_embeddings():
-    QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-    QDRANT_URL = os.getenv("QDRANT_URL")
-    QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION")
-    MISTRALAI_API_KEY=os.getenv("MISTRALAI_API_KEY")
-    ASSETS_DIR = "assets"
-
-    embeddings = MistralAIEmbeddings(
-        model="mistral-embed",
-        api_key=MISTRALAI_API_KEY
-    )
+def process_and_add_embeddings(processing_id: str, progress_callback: Callable[[str, int, int, int, str], None]):
     
-    qdrant_class = QdrantDB(QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION, embeddings)
-    qdrant_class.create_collection()
+    qdrant_class = QdrantDB()
     
     if not os.path.exists(ASSETS_DIR):
         raise ValueError(f"The folder '{ASSETS_DIR}' does not exist.")
@@ -36,7 +27,7 @@ def process_and_add_embeddings():
 
         try:
             documents: list[Document] = loader.load()
-            qdrant_class.add_documents(documents=documents)
+            qdrant_class.add_documents(documents, processing_id, progress_callback)
 
         except Exception as e:
             print(f"Error processing file {file_name}: {e}")

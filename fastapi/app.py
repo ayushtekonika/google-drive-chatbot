@@ -2,21 +2,22 @@ import os
 import uuid
 from pathlib import Path
 from dotenv import load_dotenv
-from asyncio import create_task, Lock
+from asyncio import create_task, Lock, Queue, to_thread, sleep
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from google.auth.exceptions import GoogleAuthError
 from google_drive_downloader import GoogleDriveDownloader
 from google_auth_oauthlib.flow import Flow 
-from file_embedding import process_and_add_embeddings
 
 env_path = Path('.env')
 if env_path.exists():
     load_dotenv(dotenv_path=env_path)
 
+from qdrant import initialiseVectorDatabase
+from file_embedding import process_and_add_embeddings
+
 app = FastAPI()
 STREAMLIT_UI_URL = os.getenv("STREAMLIT_UI_URL", "http://localhost:8501")
-ROOT_FOLDER_NAME = "Mridu Tiwari (RFP Overall Master - New)"
 status_lock = Lock()
 download_statuses = {}
 
@@ -25,6 +26,9 @@ flow = Flow.from_client_secrets_file(
     scopes=GoogleDriveDownloader.SCOPES,
     redirect_uri=f"{os.getenv('APP_URL', 'http://127.0.0.1:8000')}/callback",
 )
+
+processing_progress_queue = Queue()
+initialiseVectorDatabase()
 
 @app.get("/auth")
 async def authenticate():
@@ -57,22 +61,61 @@ async def callback(request: Request):
 
 @app.get("/download_status/{processing_id}")
 async def download_status(processing_id: str):
-    async with status_lock:
-        status = download_statuses.get(processing_id)
-    if not status:
-        raise HTTPException(status_code=404, detail="Processing ID not found")
-    return {"processing_id": processing_id, "status": status}
+    while True:
+        while not processing_progress_queue.empty():
+            progress = await processing_progress_queue.get()
+            if progress["processing_id"] == processing_id:
+                return progress
+        # If no update is available yet, yield control to the event loop
+        await sleep(0.5)
+
+def download_progress_callback(processing_id: str, downloaded: int, embedded: int, total: int, current_process: str):
+    status = {
+        "processing_id": processing_id,
+        "status": "in_progress",
+        "current_process": current_process,
+        "downloaded": downloaded,
+        "embedded": embedded,
+        "total": total
+    }
+    # Push the status update to the queue
+    processing_progress_queue.put_nowait(status)
+
 
 async def download_files_task(processing_id: str, downloader: GoogleDriveDownloader):
     try:
-        async with status_lock:
-            download_statuses[processing_id] = "in_progress"
+        # Initialize with in-progress status
+        status = {
+            "processing_id": processing_id,
+            "status": "in_progress",
+            "current_process": "Downloading",
+            "downloaded": 0,
+            "embedded": 0,
+            "total": 1
+        }
+        await processing_progress_queue.put(status)
 
-        downloader.download_files_in_folder(ROOT_FOLDER_NAME)
-        process_and_add_embeddings()
+        # Start downloading (make the downloader function asynchronous)
+        await to_thread(downloader.download_files_in_folder, processing_id, download_progress_callback)
+        await to_thread(process_and_add_embeddings, processing_id, download_progress_callback)
 
-        async with status_lock:
-            download_statuses[processing_id] = "completed"
+        total = downloader.get_total_files()
+        # When download is complete, update status to completed
+        status = {
+            "processing_id": processing_id,
+            "status": "completed",
+            "current_process": "",
+            "downloaded": total,
+            "embedded": total,
+            "total": total
+        }
+        await processing_progress_queue.put(status)
     except Exception as e:
-        async with status_lock:
-            download_statuses[processing_id] = f"failed: {str(e)}"
+        # If something fails, push the failure status
+        status = {
+            "processing_id": processing_id,
+            "status": f"failed: {str(e)}"
+        }
+        await processing_progress_queue.put(status)
+
+

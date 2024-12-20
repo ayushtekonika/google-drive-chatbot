@@ -1,3 +1,5 @@
+import os
+from typing import Callable
 from qdrant_client import QdrantClient
 from langchain_core.documents.base import Document
 from langchain_mistralai import MistralAIEmbeddings
@@ -9,27 +11,25 @@ from qdrant_client.models import (
 
 
 class QdrantDB:
-    def __init__(self, url: str, api_key: str, collection_name: str, embedding_function: MistralAIEmbeddings):
+    def __init__(self):
+        QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+        QDRANT_URL = os.getenv("QDRANT_URL")
+        QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION")
+        MISTRALAI_API_KEY=os.getenv("MISTRALAI_API_KEY")
         self.client = QdrantClient(
-            url=url,
-            api_key=api_key,
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
             https=True,
             timeout=60,
         )
         
-        self.collection_name = collection_name
-        self.embedding_function = embedding_function
+        self.collection_name = QDRANT_COLLECTION
+        self.embedding_function: MistralAIEmbeddings = MistralAIEmbeddings(
+                model="mistral-embed",
+                api_key=MISTRALAI_API_KEY
+            )
         self.vector_size = 1024  # Adjust vector size as needed
         # self.vector_size = 1536
-
-        # Create collection if it doesn't exist
-        if not self.client.collection_exists(collection_name):
-            self.client.create_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(
-                    size=self.vector_size, distance=Distance.COSINE
-                ),
-            )
 
     def create_collection(self):
         """
@@ -47,19 +47,25 @@ class QdrantDB:
             print(f"Collection {self.collection_name} already exists.")
             # return True
 
-    def add_documents(self, documents: list[Document]):
+    def add_documents(self, documents: list[Document], processing_id: str, progress_callback: Callable[[str, int, int, int, str], None]):
         """
         Add a list of documents with unique IDs to the collection.
         Each document should be embedded and stored with its metadata.
         """
         vector_metadata_content = []
+        downloaded_count = 0
         for doc in documents:
+            # print(doc.metadata)
+            # print(doc.id)
+            # print('------')
             doc_vector = self.embedding_function.embed_query(doc.page_content)
             doc.metadata["text"] = doc.page_content
+            downloaded_count += 1
             # doc.metadata["result"] = (
             #     doc.metadata["source"].split("\\")[-1].split(".")[0]
             # )
             vector_metadata_content.append([doc_vector, doc.metadata])
+            progress_callback(processing_id, 0, downloaded_count, len(documents), "Embedding")
 
         # Upsert the documents to the collection
         self.client.upsert(
@@ -71,6 +77,10 @@ class QdrantDB:
                 for idx, vector_metadata in enumerate(vector_metadata_content)
             ],
         )
+
+def initialiseVectorDatabase():
+    qdrant_class = QdrantDB()
+    qdrant_class.create_collection()
 
 
 

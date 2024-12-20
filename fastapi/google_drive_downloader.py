@@ -2,6 +2,7 @@ import os
 import re
 import io
 import logging
+from typing import Callable
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 from googleapiclient.http import MediaIoBaseDownload
@@ -17,6 +18,7 @@ class GoogleDriveDownloader:
     CREDENTIALS_FILE = "creds.json"
     TOKEN_FILE = "token.json"
     DOWNLOAD_DIR = "./assets"
+    ROOT_FOLDER_NAME = "Mridu Tiwari (RFP Overall Master - New)"
 
     def __init__(self):
         self.service = None
@@ -64,6 +66,12 @@ class GoogleDriveDownloader:
             fields="files(id, name, mimeType)"
         ).execute()
         return results.get('files', [])
+    
+    def get_total_files(self):
+        folder_id = self.get_folder_id(self.ROOT_FOLDER_NAME)
+        files = self.list_files_in_folder(folder_id)
+        return len([file for file in files if file['mimeType'] != 'application/vnd.google-apps.folder'])
+
 
     def download_file(self, file_id, file_name):
         """Download a file by its ID."""
@@ -87,11 +95,15 @@ class GoogleDriveDownloader:
 
         logger.info(f"Downloaded: {file_name} to {file_path}")
 
-    def download_files_in_folder(self, folder_name):
+    def download_files_in_folder(self, processing_id: str, progress_callback: Callable[[str, int, int, int, str], None]):
         """Download all files in a folder."""
         self.ensure_download_directory()
-        folder_id = self.get_folder_id(folder_name)
+        folder_id = self.get_folder_id(self.ROOT_FOLDER_NAME)
         files = self.list_files_in_folder(folder_id)
+        total_files = len([file for file in files if file['mimeType'] != 'application/vnd.google-apps.folder'])
+        downloaded_count = 0
         for file in files:
             if file['mimeType'] != 'application/vnd.google-apps.folder':  # Skip subfolders
                 self.download_file(file['id'], file['name'])
+                downloaded_count += 1
+                progress_callback(processing_id, downloaded_count, 0, total_files, "Downloading")

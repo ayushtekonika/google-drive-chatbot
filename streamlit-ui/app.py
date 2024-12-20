@@ -190,15 +190,25 @@ def main():
         # Processing ID found, poll the status
         st.write(f"Processing ID: {processing_id}")
         status_placeholder = st.empty()  # Placeholder for status updates
-
+        progress_text = "Downloading documents..."
+        my_bar = st.progress(0, text=progress_text)
         while True:
             # API call to check status
             status_url = f"{API_BASE_URL}/download_status/{processing_id}"
             try:
                 response = requests.get(status_url)
                 if response.status_code == 200:
-                    status = response.json().get("status", "unknown")
-                    status_placeholder.write(f"Download Status: {status}")
+                    json_resp = response.json()
+                    print(json_resp)
+                    status = json_resp.get("status", "unknown")
+                    downloaded = json_resp.get("downloaded", 0)
+                    embedded = json_resp.get("embedded", 0)
+                    total = json_resp.get("total", 1)
+                    current_process = json_resp.get("current_process")
+                    progress = (embedded/total) if current_process == "Embedding" else (downloaded/total)
+                    status_placeholder.write(f"Document Ingestion Status: {status}")
+                    progress_text = "Embedding documents..." if current_process == "Embedding" else "Downloading documents..."
+                    my_bar.progress(progress, text=progress_text)
 
                     # Exit the loop if the status is completed or failed
                     if status in ["completed", "failed"]:
@@ -207,6 +217,7 @@ def main():
                     status_placeholder.error(f"Failed to fetch status: {response.json().get('detail', 'Unknown error')}")
                     break
             except Exception as e:
+                print(e)
                 status_placeholder.error(f"Error fetching download status: {str(e)}")
                 break
 
