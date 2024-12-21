@@ -194,10 +194,27 @@ def main():
         st.button("Sync with Google Drive", on_click=open_page)
 
         rfp_status = st.radio("RFPs to chat with", options=["all", "new", "submitted"], index=0, horizontal=True)
-        query = st.text_input("Your question:", placeholder="Type your question here...")
-        if st.button("Submit") and query:
-            with st.spinner("Generating response..."):
-                # Generate response using the selected RFP status
+        # query = st.text_input("Your question:", placeholder="Type your question here...")
+        # if st.button("Submit") and query:
+        #     with st.spinner("Generating response..."):
+        #         # Generate response using the selected RFP status
+        #         filter_metadata = None
+        #         if rfp_status != "all":
+        #             filter_metadata = {"rfp_status": rfp_status}
+        #         if st.session_state.conversational_rag_chain is None:
+        #             st.session_state.conversational_rag_chain = st.session_state.assistant.generate_response(
+        #                 metadata_filter=filter_metadata
+        #             )
+        #         response = st.session_state.assistant.Response(
+        #             st.session_state.conversational_rag_chain, query, session_id
+        #         )
+        #         st.write(response)
+        
+        # Accept user input
+        if prompt := st.chat_input("What is up?"):
+            # Display user message in chat message container
+            with st.chat_message("user"):
+                st.markdown(prompt)
                 filter_metadata = None
                 if rfp_status != "all":
                     filter_metadata = {"rfp_status": rfp_status}
@@ -206,9 +223,12 @@ def main():
                         metadata_filter=filter_metadata
                     )
                 response = st.session_state.assistant.Response(
-                    st.session_state.conversational_rag_chain, query, session_id
+                    st.session_state.conversational_rag_chain, prompt, session_id
                 )
-                st.write(response)
+        
+            # Display assistant response in chat message container
+            with st.chat_message("assistant"):
+                response = st.write(response)
 
     else:
         # Processing ID found, poll the status
