@@ -1,4 +1,5 @@
 import os
+import re
 from uuid import uuid4
 from typing import Callable
 from qdrant_client import QdrantClient
@@ -9,6 +10,19 @@ from qdrant_client.models import (
     Distance,
     PointStruct
 )
+
+def extract_file_details(file_path):
+    # Extract the file name from the path
+    file_name = os.path.basename(file_path)
+    # Extract the prefix and the cleaned file name
+    match = re.match(r'^([^_]+)_(.+)', file_name)
+    if match:
+        prefix = match.group(1)
+        cleaned_file_name = match.group(2)
+    else:
+        prefix = ""  # No prefix found
+        cleaned_file_name = file_name
+    return {"prefix": prefix, "filename": cleaned_file_name}
 
 
 class QdrantDB:
@@ -48,37 +62,39 @@ class QdrantDB:
             print(f"Collection {self.collection_name} already exists.")
             # return True
 
-    def add_documents(self, documents: list[Document], processing_id: str, progress_callback: Callable[[str, int, int, int, str], None]):
+    def add_documents(self, documents: list[Document], processing_id: str, progress_callback: Callable[[str, int, int, str], None]):
         """
         Add a list of documents with unique IDs to the collection.
         Each document should be embedded and stored with its metadata.
         """
         vector_metadata_content = []
-        downloaded_count = 0
+        embedded_count = 0
         for doc in documents:
             doc_vector = self.embedding_function.embed_query(doc.page_content)
+            file_details = extract_file_details(doc.metadata["source"])
+            id = str(uuid4())
             doc.metadata["metadata"] = {
-                "id": str(uuid4()),
-                "source": doc.metadata["source"],
+                "id": id,
+                "source": file_details["filename"],
+                "rfp_status": file_details["prefix"],
+                "page": doc.metadata["page"],
                 "page_content": doc.page_content
             }
-            downloaded_count += 1
-            # doc.metadata["result"] = (
-            #     doc.metadata["source"].split("\\")[-1].split(".")[0]
-            # )
-            vector_metadata_content.append([doc_vector, doc.metadata])
-            progress_callback(processing_id, 0, downloaded_count, len(documents), "Embedding")
+            embedded_count += 1
+            vector_metadata_content.append([doc_vector, doc.metadata, id])
+            progress_callback(processing_id, embedded_count, len(documents), "Embedding Documents")
 
         # Upsert the documents to the collection
         self.client.upsert(
             collection_name=self.collection_name,
             points=[
                 PointStruct(
-                    id=idx, vector=vector_metadata[0], payload=vector_metadata[1]
+                    id=vector_metadata[2], vector=vector_metadata[0], payload=vector_metadata[1]
                 )
                 for idx, vector_metadata in enumerate(vector_metadata_content)
             ],
         )
+        progress_callback(processing_id, embedded_count, len(documents), "Inserting Documents in DB")
 
 def initialiseVectorDatabase():
     qdrant_class = QdrantDB()

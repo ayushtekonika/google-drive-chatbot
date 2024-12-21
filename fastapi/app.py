@@ -69,13 +69,12 @@ async def download_status(processing_id: str):
         # If no update is available yet, yield control to the event loop
         await sleep(0.5)
 
-def download_progress_callback(processing_id: str, downloaded: int, embedded: int, total: int, current_process: str):
+def download_progress_callback(processing_id: str, processed: int, total: int, current_process: str):
     status = {
         "processing_id": processing_id,
         "status": "in_progress",
         "current_process": current_process,
-        "downloaded": downloaded,
-        "embedded": embedded,
+        "processed": processed,
         "total": total
     }
     # Push the status update to the queue
@@ -88,15 +87,14 @@ async def download_files_task(processing_id: str, downloader: GoogleDriveDownloa
         status = {
             "processing_id": processing_id,
             "status": "in_progress",
-            "current_process": "Downloading",
-            "downloaded": 0,
-            "embedded": 0,
+            "current_process": "Downloading Documents",
+            "processed": 0,
             "total": 1
         }
         await processing_progress_queue.put(status)
 
         # Start downloading (make the downloader function asynchronous)
-        await to_thread(downloader.download_files_in_folder, processing_id, download_progress_callback)
+        await to_thread(downloader.download_all, processing_id, download_progress_callback)
         await to_thread(process_and_add_embeddings, processing_id, download_progress_callback)
 
         total = downloader.get_total_files()
@@ -105,8 +103,7 @@ async def download_files_task(processing_id: str, downloader: GoogleDriveDownloa
             "processing_id": processing_id,
             "status": "completed",
             "current_process": "",
-            "downloaded": total,
-            "embedded": total,
+            "processed": total,
             "total": total
         }
         await processing_progress_queue.put(status)

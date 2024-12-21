@@ -19,9 +19,11 @@ class GoogleDriveDownloader:
     TOKEN_FILE = "token.json"
     DOWNLOAD_DIR = "./assets"
     ROOT_FOLDER_NAME = "Mridu Tiwari (RFP Overall Master - New)"
+    FOLDER_LIST = ["new", "submitted"]
 
     def __init__(self):
         self.service = None
+        self.total_files_downloaded = 0
 
     def load_credentials(self):
         """Load or refresh credentials."""
@@ -50,9 +52,11 @@ class GoogleDriveDownloader:
         if not os.path.exists(self.DOWNLOAD_DIR):
             os.makedirs(self.DOWNLOAD_DIR)
 
-    def get_folder_id(self, folder_name):
+    def get_folder_id(self, folder_name, parent_id=None):
         """Find the ID of a folder by its name."""
         query = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder'"
+        if parent_id:
+            query += f" and '{parent_id}' in parents"
         results = self.service.files().list(q=query, fields="files(id, name)").execute()
         folders = results.get('files', [])
         if not folders:
@@ -68,42 +72,72 @@ class GoogleDriveDownloader:
         return results.get('files', [])
     
     def get_total_files(self):
-        folder_id = self.get_folder_id(self.ROOT_FOLDER_NAME)
-        files = self.list_files_in_folder(folder_id)
-        return len([file for file in files if file['mimeType'] != 'application/vnd.google-apps.folder'])
+        """Get the total number of files in ROOT_FOLDER_NAME/{folders in FOLDER_LIST}."""
+        total_files = 0
+        root_folder_id = self.get_folder_id(self.ROOT_FOLDER_NAME)
+
+        for subfolder in self.FOLDER_LIST:
+            try:
+                subfolder_id = self.get_folder_id(subfolder, parent_id=root_folder_id)
+                files = self.list_files_in_folder(subfolder_id)
+                total_files += len([file for file in files if file['mimeType'] != 'application/vnd.google-apps.folder'])
+            except HTTPException as e:
+                logger.error(f"Failed to process folder '{subfolder}': {e.detail}")
+
+        return total_files
 
 
-    def download_file(self, file_id, file_name):
-        """Download a file by its ID."""
+
+    def download_file(self, file_id, file_name, parent_folder_name):
+        """Download a file by its ID and append its parent folder name to the file name."""
         if not file_name.lower().endswith(('.docx', '.pdf')):
             logger.info(f"Skipping download for '{file_name}': Unsupported file type.")
             return
 
-        request = self.service.files().get_media(fileId=file_id)
-        file_path = os.path.join(self.DOWNLOAD_DIR, self.sanitize_filename(file_name))
+        # Append the parent folder name to the file name
+        modified_file_name = f"{parent_folder_name}_{file_name}"
+        sanitized_file_name = self.sanitize_filename(modified_file_name)
+        file_path = os.path.join(self.DOWNLOAD_DIR, sanitized_file_name)
 
         if os.path.exists(file_path):
-            logger.info(f"File '{file_name}' already exists at {file_path}. Skipping download.")
+            logger.info(f"File '{sanitized_file_name}' already exists at {file_path}. Skipping download.")
             return
+
+        request = self.service.files().get_media(fileId=file_id)
 
         with io.FileIO(file_path, 'wb') as file:
             downloader = MediaIoBaseDownload(file, request)
             done = False
             while not done:
                 status, done = downloader.next_chunk()
-                logger.info(f"Downloading {file_name}: {int(status.progress() * 100)}% complete")
+                logger.info(f"Downloading {sanitized_file_name}: {int(status.progress() * 100)}% complete")
 
-        logger.info(f"Downloaded: {file_name} to {file_path}")
+        logger.info(f"Downloaded: {sanitized_file_name} to {file_path}")
 
-    def download_files_in_folder(self, processing_id: str, progress_callback: Callable[[str, int, int, int, str], None]):
+
+    def download_files_in_folder(self, folder_id, folder_name: str, processing_id: str, progress_callback: Callable[[str, int, int, str], None]):
         """Download all files in a folder."""
-        self.ensure_download_directory()
-        folder_id = self.get_folder_id(self.ROOT_FOLDER_NAME)
         files = self.list_files_in_folder(folder_id)
-        total_files = len([file for file in files if file['mimeType'] != 'application/vnd.google-apps.folder'])
-        downloaded_count = 0
+        total_files = self.get_total_files()
+        # downloaded_count = 0
         for file in files:
             if file['mimeType'] != 'application/vnd.google-apps.folder':  # Skip subfolders
-                self.download_file(file['id'], file['name'])
-                downloaded_count += 1
-                progress_callback(processing_id, downloaded_count, 0, total_files, "Downloading")
+                self.download_file(file['id'], file['name'], folder_name)
+                self.total_files_downloaded += 1
+                progress_callback(processing_id, self.total_files_downloaded, total_files, "Downloading Documents")
+
+    def download_all(self, processing_id: str, progress_callback: Callable[[str, int, int, str], None]):
+        """Download files from ROOT_FOLDER_NAME and its specified subfolders."""
+        self.ensure_download_directory()
+        self.initialize_service()
+
+        # Get the ID of the root folder
+        root_folder_id = self.get_folder_id(self.ROOT_FOLDER_NAME)
+
+        for subfolder in self.FOLDER_LIST:
+            try:
+                subfolder_id = self.get_folder_id(subfolder, parent_id=root_folder_id)
+                logger.info(f"Downloading files from folder: {self.ROOT_FOLDER_NAME}/{subfolder}")
+                self.download_files_in_folder(subfolder_id, subfolder, processing_id, progress_callback)
+            except HTTPException as e:
+                logger.error(f"Failed to process folder '{subfolder}': {e.detail}")

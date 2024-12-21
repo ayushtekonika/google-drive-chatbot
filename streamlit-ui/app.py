@@ -5,12 +5,12 @@ import requests
 from urllib.parse import urlencode
 import time
 import webbrowser
-from typing import List
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_core.documents import Document
 from qdrant_client import QdrantClient
-from langchain.vectorstores import Qdrant
+from qdrant_client.http import models as qdrant_models
 from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_qdrant import QdrantVectorStore
 from langchain_mistralai import ChatMistralAI
@@ -55,7 +55,7 @@ st.title("Google Drive Chatbot")
 query_params = st.query_params
 processing_id = query_params.get("processing_id")
 
-def retrieve_as_retriever() -> VectorStoreRetriever:
+def retrieve_as_retriever(metadata_filter: Optional[Dict[str, Any]] = None) -> VectorStoreRetriever:
     """Load the existing vectorstore and retrieve top_k relevant documents based on the query."""
     try:
         qdrant_client = QdrantClient(
@@ -63,6 +63,17 @@ def retrieve_as_retriever() -> VectorStoreRetriever:
             api_key=QDRANT_API_KEY
         )
         embeddings = MistralAIEmbeddings(model="mistral-embed", api_key=MISTRALAI_API_KEY)
+        search_kwargs={"k": 3, "with_payload": True}
+        if metadata_filter:
+            filter = qdrant_models.Filter(
+                    must=[
+                        qdrant_models.FieldCondition(
+                            key="rfp_status",
+                            match=qdrant_models.MatchValue(value=metadata_filter["rfp_status"])
+                        )
+                    ]
+                )
+            search_kwargs["filter"] = filter
         
         # Initialize the vectorstore
         vectorstore = QdrantVectorStore(
@@ -73,14 +84,14 @@ def retrieve_as_retriever() -> VectorStoreRetriever:
         )
         
         # Retrieve the top 3 documents using similarity search
-        return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3, "with_payload": True})
+        return vectorstore.as_retriever(search_type="similarity", search_kwargs=search_kwargs)
     except Exception as e:
         print(f"Error during document retrieval: {e}")
         raise e
 
 def format_docs_with_id(docs: List[Document]) -> str:
     formatted = set([
-        f"Source: {os.path.basename(os.path.normpath(doc.metadata['source']))}"
+        f"Source: {os.path.basename(os.path.normpath(doc.metadata['source']))} \n Page Number: {doc.metadata['page']}"
         for i, doc in enumerate(docs)
     ])
     return "\n\n" + "\n\n".join(formatted)
@@ -97,9 +108,8 @@ class ChatAssistant:
                     )
 
 
-    def generate_response(self) -> RunnableWithMessageHistory:
-
-        retriever = retrieve_as_retriever()
+    def generate_response(self, metadata_filter: Optional[Dict[str, Any]] = None) -> RunnableWithMessageHistory:
+        retriever = retrieve_as_retriever(metadata_filter)
 
         ### Contextualize question ###
         contextualize_q_system_prompt = """Given a chat history and the latest user question \
@@ -119,10 +129,13 @@ class ChatAssistant:
 
 
         ### Answer question ###
-        qa_system_prompt = """You are an assistant for question-answering tasks. \
-        Use the following pieces of retrieved context to answer the question. \
-        If you don't know the answer, just say that you don't know. \
-        Use three sentences maximum and keep the answer concise.\
+        qa_system_prompt = """You are an intelligent assistant designed to help \
+        users interact with documents related to the company's Requests for Proposals (RFPs) \
+        and their responses. Use the retrieved context from the document database to provide \
+        accurate, concise, and helpful answers to questions. \
+        Ensure you prioritize factual information from the documents and clarify if the information is not available. \
+        Maintain professionalism and be concise. \
+        If a user asks a question outside the scope of the documents, politely inform them.
 
         {context}"""
         qa_prompt = ChatPromptTemplate.from_messages(
@@ -174,19 +187,29 @@ def main():
     if not processing_id:
         if 'assistant' not in st.session_state:
             st.session_state.assistant = ChatAssistant()
-            st.session_state.conversational_rag_chain = st.session_state.assistant.generate_response()
+            st.session_state.conversational_rag_chain = None
         session_id = "123455"  # Static session ID for example purposes
-        # No processing ID, show the sync button
+
         st.write("Click the button below to sync files with Google Drive.")
         st.button("Sync with Google Drive", on_click=open_page)
-        
+
+        rfp_status = st.radio("RFPs to chat with", options=["all", "new", "submitted"], index=0, horizontal=True)
         query = st.text_input("Your question:", placeholder="Type your question here...")
         if st.button("Submit") and query:
             with st.spinner("Generating response..."):
+                # Generate response using the selected RFP status
+                filter_metadata = None
+                if rfp_status != "all":
+                    filter_metadata = {"rfp_status": rfp_status}
+                if st.session_state.conversational_rag_chain is None:
+                    st.session_state.conversational_rag_chain = st.session_state.assistant.generate_response(
+                        metadata_filter=filter_metadata
+                    )
                 response = st.session_state.assistant.Response(
                     st.session_state.conversational_rag_chain, query, session_id
                 )
                 st.write(response)
+
     else:
         # Processing ID found, poll the status
         st.write(f"Processing ID: {processing_id}")
@@ -202,18 +225,12 @@ def main():
                     json_resp = response.json()
                     print(json_resp)
                     status = json_resp.get("status", "unknown")
-                    downloaded = json_resp.get("downloaded", 0)
-                    embedded = json_resp.get("embedded", 0)
+                    processed = json_resp.get("processed", 0)
                     total = json_resp.get("total", 1)
                     current_process = json_resp.get("current_process")
-                    progress = (embedded/total) if current_process == "Embedding" else (downloaded/total)
+                    progress = (processed/total)
                     status_placeholder.write(f"Document Ingestion Status: {status}")
-                    if current_process == "Embedding":
-                        progress_text = "Embedding documents..."
-                    elif current_process == "Downloading":
-                        progress_text = "Downloading documents..."
-                    else:
-                        progress_text = "Processing Complete"
+                    progress_text = f"{current_process}..."
                     my_bar.progress(progress, text=progress_text)
 
                     # Exit the loop if the status is completed or failed
