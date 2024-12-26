@@ -104,7 +104,8 @@ class ChatAssistant:
                         model="mistral-large-latest",
                         temperature=0.2,
                         max_retries=2,
-                        api_key=MISTRALAI_API_KEY
+                        api_key=MISTRALAI_API_KEY,
+                        streaming=True
                     )
 
 
@@ -169,17 +170,30 @@ class ChatAssistant:
 
     def Response(self, conversational_rag_chain: RunnableWithMessageHistory, query, session_id):
 
-        response = conversational_rag_chain.invoke(
-                {"input": query},
-                config={
-                    "configurable": {"session_id": session_id}
-                },  # constructs a key "abc123" in `store`.
-            )
-        
-        response_with_references = f"{response['answer']}\n````` {format_docs_with_id(response['context'])}"
-        response = response["answer"]
+        # response = conversational_rag_chain.invoke(
+        #         {"input": query},
+        #         config={
+        #             "configurable": {"session_id": session_id}
+        #         },
+        #     )
 
-        return response_with_references
+        #response_with_references = f"{response['answer']}\n````` {format_docs_with_id(response['context'])}"
+        # response = response["answer"]
+        # return response_with_references
+
+        context = None
+        for response in  conversational_rag_chain.stream(
+            {"input": query},
+            config={
+                "configurable": {"session_id": session_id}
+            },
+        ):
+            if 'context' in response:
+                context = response['context']
+            if 'answer' in response:
+                yield str(response['answer'])
+
+        yield f"\n````` {format_docs_with_id(context)}"
 
 
 def main():
@@ -228,7 +242,7 @@ def main():
         
             # Display assistant response in chat message container
             with st.chat_message("assistant"):
-                response = st.write(response)
+                response = st.write_stream(response)
 
     else:
         # Processing ID found, poll the status
